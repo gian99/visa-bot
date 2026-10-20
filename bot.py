@@ -77,18 +77,19 @@ class LoginFailed(Exception):
     pass
 
 
-def notify(text: str, header: str | None = None) -> None:
-    """Post to Slack. With `header`, the message gets a large title block."""
+def notify(text: str, header: str | None = None, ping: bool = False) -> None:
+    """Post to Slack. With `header`, the message gets a large title in a green
+    box; `ping` adds @channel so it pushes to phones even if the channel is muted."""
     log.info("NOTIFY: %s%s", f"{header} | " if header else "", text)
     if not SLACK_WEBHOOK:
         log.warning("SLACK_WEBHOOK_URL not set; notification not sent.")
         return
     payload = {"text": text}
     if header:
-        # `text` stays as the push-notification fallback
-        payload["text"] = f"{header}\n{text}"
-        # Inside a green attachment so the message gets a green side bar
-        payload["attachments"] = [{"color": "#2eb67d", "blocks": [
+        # Slack shows the top-level text above the box, so keep it to the mention
+        # only; `fallback` is what the phone notification shows.
+        payload["text"] = "<!channel>" if ping else ""
+        payload["attachments"] = [{"color": "#2eb67d", "fallback": f"{header}\n{text}", "blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
             {"type": "section", "text": {"type": "mrkdwn", "text": text}},
         ]}]
@@ -246,11 +247,11 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 if earlier and (best_notified is None or earliest < best_notified):
                     best_notified = earliest
                     preview = ", ".join(d.strftime("%b %d, %Y") for d in earlier[:5])
-                    notify(f"<!channel> *Earlier date available in Lima*\n"
+                    notify(f"*Earlier date available in Lima*\n"
                            f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
                            f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
                            f"(log in and it opens the reschedule page directly)",
-                           header=":white_check_mark: APPOINTMENT FOUND! :white_check_mark:")
+                           header=":white_check_mark: APPOINTMENT FOUND! :white_check_mark:", ping=True)
                 elif not earlier:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
