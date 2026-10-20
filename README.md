@@ -237,14 +237,14 @@ you can try `7`. Going below `5` is not recommended.
 | Symptom | Likely cause / fix |
 |---|---|
 | `KeyError: 'SCHEDULE_ID'` (or another variable) | Missing or misspelled secret/variable. `SCHEDULE_ID` must be under **Variables**; email, password and webhook under **Secrets** |
-| `Login fallido: revisa usuario/clave` (🛑 in Slack) | Wrong email or password, or the password changed. Update `VISA_PASSWORD`. The bot doesn't retry within the run |
+| `Login failed: check email/password` (🛑 in Slack) | Wrong email or password, or the password changed. Update `VISA_PASSWORD`. The bot doesn't retry within the run |
 | `Timeout ... waiting for locator("#user_email")` | The sign-in page didn't load, possibly a `403` or the site being down. Try again later |
 | `socket hang up` / `Failed to fetch` | Transient network drop. The bot retries automatically |
 | Repeated 🟡 / empty results | Probably rate-limited. The bot backs off on its own; consider raising `CHECK_INTERVAL_MINUTES` |
 | No Slack message from `test` | Check the `SLACK_WEBHOOK_URL` secret. If the Slack app was reinstalled, create a new webhook |
 | Scheduled runs stopped | GitHub disables cron workflows after 60 days without repo activity. Re-enable the workflow |
 
-Logs are in **Actions → (run) → check → Run bot**. The logs are written in Spanish.
+Logs are in **Actions → (run) → check → Run bot**.
 
 ---
 

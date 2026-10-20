@@ -1,14 +1,14 @@
-"""Monitor de citas de visa USA (ais.usvisa-info.com) - solo avisa.
+"""US visa appointment monitor (ais.usvisa-info.com) - notify only.
 
-Inicia sesion, consulta las fechas disponibles del consulado y manda un
-mensaje a Slack si hay alguna anterior a tu cita actual. No reprograma nada.
+Logs in, fetches the consulate's available dates and posts to Slack when one
+is earlier than your current appointment. It never reschedules anything.
 
-Uso:
-    python bot.py          # corre en bucle (hasta MAX_RUNTIME_MINUTES si esta definido)
-    python bot.py --once   # una sola revision
-    python bot.py --test   # solo envia un mensaje de prueba a Slack
-    python bot.py --report # ademas manda a Slack el estado de la primera revision
-    python bot.py --show   # muestra el navegador (debug local)
+Usage:
+    python bot.py          # loop (until MAX_RUNTIME_MINUTES, if set)
+    python bot.py --once   # single check
+    python bot.py --test   # only send a test message to Slack
+    python bot.py --report # also post the status of the first check to Slack
+    python bot.py --show   # show the browser window (local debugging)
 """
 
 import argparse
@@ -32,34 +32,36 @@ EMAIL = os.environ["VISA_EMAIL"]
 PASSWORD = os.environ["VISA_PASSWORD"]
 COUNTRY = os.getenv("COUNTRY_CODE") or "es-pe"
 SCHEDULE_ID = os.environ["SCHEDULE_ID"]
-# Respaldo: solo se usa si no se puede leer la cita actual del portal.
+# Fallback: only used if the current appointment can't be read from the portal.
 FALLBACK_DATE = os.getenv("CURRENT_APPOINTMENT_DATE") or ""
 INTERVAL_MIN = float(os.getenv("CHECK_INTERVAL_MINUTES") or "10")
-MAX_RUNTIME_MIN = float(os.getenv("MAX_RUNTIME_MINUTES") or "0")  # 0 = sin limite
+MAX_RUNTIME_MIN = float(os.getenv("MAX_RUNTIME_MINUTES") or "0")  # 0 = no limit
 SLACK_WEBHOOK = (os.getenv("SLACK_WEBHOOK_URL") or "").strip()
 
 BASE = f"https://ais.usvisa-info.com/{COUNTRY}/niv"
 SIGN_IN_URL = f"{BASE}/users/sign_in"
 APPOINTMENT_URL = f"{BASE}/schedule/{SCHEDULE_ID}/appointment?confirmed_limit_message=1&commit=Continue"
 
-# El sitio rechaza (403) el user-agent "HeadlessChrome", usamos uno normal.
+# The site rejects (403) the "HeadlessChrome" user agent, so use a regular one.
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
-# Si la API devuelve lista vacia varias veces seguidas, suele ser un bloqueo
-# temporal por exceso de consultas: en ese caso esperamos mucho mas.
+# Several empty responses in a row usually mean a temporary rate-limit block,
+# so wait much longer before trying again.
 EMPTY_LIMIT = 3
+BACKOFF_HOURS = 3
+# Stop the run if it still looks blocked after a pause, or after too many errors
+# in a row, so the block isn't made worse.
+MAX_BLOCKS = 2
+MAX_ERRORS = 5
+
+# The portal shows dates in Spanish (e.g. "13 abril, 2027").
 MONTHS_ES = {m: i for i, m in enumerate(
     ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
      "septiembre", "octubre", "noviembre", "diciembre"], start=1)}
 MONTHS_ES["setiembre"] = 9
-BACKOFF_HOURS = 3
-# Si vuelve a parecer bloqueado tras la pausa, o hay demasiados errores seguidos,
-# se detiene la ejecucion para no empeorar el bloqueo.
-MAX_BLOCKS = 2
-MAX_ERRORS = 5
 
-# Enlace a la ejecucion actual de GitHub Actions (vacio si se corre localmente)
+# Link to the current GitHub Actions run (empty when running locally)
 RUN_URL = (f"{os.getenv('GITHUB_SERVER_URL')}/{os.getenv('GITHUB_REPOSITORY')}"
            f"/actions/runs/{os.getenv('GITHUB_RUN_ID')}" if os.getenv("GITHUB_RUN_ID") else "")
 
@@ -75,24 +77,24 @@ class LoginFailed(Exception):
     pass
 
 
+def notify(text: str) -> None:
+    log.info("NOTIFY: %s", text)
+    if not SLACK_WEBHOOK:
+        log.warning("SLACK_WEBHOOK_URL not set; notification not sent.")
+        return
+    try:
+        requests.post(SLACK_WEBHOOK, json={"text": text}, timeout=15).raise_for_status()
+    except requests.RequestException as e:
+        log.error("Could not post to Slack: %s", e)
+
+
 def notify_stop(reason: str) -> None:
     link = f"\nRun: {RUN_URL}" if RUN_URL else ""
     notify(f":octagonal_sign: *Visa bot stopped*\n{reason}{link}")
 
 
-def notify(text: str) -> None:
-    log.info("AVISO: %s", text)
-    if not SLACK_WEBHOOK:
-        log.warning("SLACK_WEBHOOK_URL no configurado; no se envio el aviso.")
-        return
-    try:
-        requests.post(SLACK_WEBHOOK, json={"text": text}, timeout=15).raise_for_status()
-    except requests.RequestException as e:
-        log.error("No se pudo enviar a Slack: %s", e)
-
-
 def read_current_appointment(page: Page) -> date:
-    """Lee la cita actual de la pagina de grupos (a la que lleva el login)."""
+    """Read the current appointment from the groups page (where login lands)."""
     for el in page.locator("p.consular-appt").all():
         if SCHEDULE_ID not in (el.inner_html() or ""):
             continue
@@ -100,15 +102,16 @@ def read_current_appointment(page: Page) -> date:
         if m and m.group(2).lower() in MONTHS_ES:
             return date(int(m.group(3)), MONTHS_ES[m.group(2).lower()], int(m.group(1)))
     if FALLBACK_DATE:
-        log.warning("No se pudo leer la cita del portal; uso CURRENT_APPOINTMENT_DATE=%s", FALLBACK_DATE)
+        log.warning("Could not read the appointment from the portal; using CURRENT_APPOINTMENT_DATE=%s",
+                    FALLBACK_DATE)
         return date.fromisoformat(FALLBACK_DATE)
-    raise RuntimeError("No se pudo leer la cita actual del portal")
+    raise RuntimeError("Could not read the current appointment from the portal")
 
 
 def login(page: Page) -> tuple[str, date]:
-    """Inicia sesion y devuelve (facility_id del consulado, fecha de la cita actual)."""
-    log.info("Iniciando sesion...")
-    # Empezar siempre con una sesion limpia, aunque se este reintentando
+    """Log in and return (consulate facility_id, current appointment date)."""
+    log.info("Logging in...")
+    # Always start from a clean session, even when retrying
     page.context.clear_cookies()
     page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
     page.fill("#user_email", EMAIL)
@@ -117,23 +120,23 @@ def login(page: Page) -> tuple[str, date]:
     page.click("input[name=commit]")
     page.wait_for_load_state("networkidle")
     if "sign_in" in page.url:
-        raise LoginFailed("Login fallido: revisa usuario/clave")
+        raise LoginFailed("Login failed: check email/password")
     current = read_current_appointment(page)
 
     page.goto(APPOINTMENT_URL, wait_until="domcontentloaded")
     facility = page.locator("#appointments_consulate_appointment_facility_id")
     facility.wait_for(state="attached", timeout=30_000)
     facility_id = facility.input_value()
-    # El servidor corta consultas hechas justo despues de cargar la pagina
+    # The server drops requests made right after the page loads
     page.wait_for_timeout(random.uniform(4, 7) * 1000)
-    log.info("Sesion iniciada. Consulado: %s (id %s). Cita actual: %s",
+    log.info("Logged in. Consulate: %s (id %s). Current appointment: %s",
              facility.locator("option:checked").inner_text().strip(), facility_id, current)
     return facility_id, current
 
 
 def fetch_dates(page: Page, facility_id: str) -> list[date]:
     url = f"{BASE}/schedule/{SCHEDULE_ID}/appointment/days/{facility_id}.json?appointments[expedite]=false"
-    # Peticion directa con las cookies de la sesion (no depende del estado de la pagina)
+    # Direct request with the session cookies (doesn't depend on the page state)
     headers = {
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
@@ -143,10 +146,10 @@ def fetch_dates(page: Page, facility_id: str) -> list[date]:
         try:
             res = page.context.request.get(url, headers=headers)
             break
-        except Exception as e:  # noqa: BLE001  (p. ej. "socket hang up")
+        except Exception as e:  # noqa: BLE001  (e.g. "socket hang up")
             if attempt == 2:
                 raise
-            log.info("Corte de red (%s); reintentando...", str(e).splitlines()[0])
+            log.info("Network drop (%s); retrying...", str(e).splitlines()[0])
             time.sleep(5 * (attempt + 1))
     text = res.text()
     if res.status in (401, 403) or text.lstrip().startswith("<"):
@@ -158,11 +161,11 @@ def fetch_dates(page: Page, facility_id: str) -> list[date]:
 
 
 def wait(minutes: float) -> bool:
-    """Duerme; devuelve False si ya no queda tiempo de ejecucion para esperar."""
+    """Sleep; return False if there's no runtime left to wait."""
     if MAX_RUNTIME_MIN and (time.monotonic() - START) / 60 + minutes >= MAX_RUNTIME_MIN:
-        log.info("Se alcanzo el tiempo maximo de ejecucion. Fin.")
+        log.info("Max runtime reached. Exiting.")
         return False
-    log.info("Proxima revision en %.1f min (%s)", minutes,
+    log.info("Next check in %.1f min (%s)", minutes,
              datetime.fromtimestamp(time.time() + minutes * 60).strftime("%H:%M"))
     time.sleep(minutes * 60)
     return True
@@ -186,8 +189,8 @@ def run(once: bool, headless: bool, report: bool) -> int:
                     facility_id, current_date = login(page)
                 dates = fetch_dates(page, facility_id)
             except LoginFailed as e:
-                # No reintentar: varios intentos fallidos pueden bloquear la cuenta
-                log.error("%s. Deteniendo.", e)
+                # Don't retry: repeated failed logins can lock the account
+                log.error("%s. Stopping.", e)
                 notify_stop("Login failed: wrong email or password. Not retrying, to avoid locking "
                             "the account.\nUpdate the `VISA_PASSWORD` secret, or disable the workflow "
                             "until you do (scheduled runs will try again).")
@@ -196,10 +199,10 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 facility_id = None
                 if relogins == 0:
                     relogins += 1
-                    log.info("Fallo la consulta (%s); se volvera a iniciar sesion.", e)
+                    log.info("Check failed (%s); logging in again.", e)
                     continue
                 errors += 1
-                log.error("Error en la revision: %s", e)
+                log.error("Check failed: %s", e)
                 first_line = str(e).splitlines()[0]
                 if errors == 3:
                     notify(f":warning: Visa bot: 3 checks failed in a row, will keep retrying. "
@@ -209,7 +212,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
                                 "The next scheduled run will try again.")
                     return 1
                 if once:
-                    notify(f":warning: *Visa bot: check failed*\n{str(e).splitlines()[0]}")
+                    notify(f":warning: *Visa bot: check failed*\n{first_line}")
                     return 1
                 if not wait(INTERVAL_MIN * 2):
                     return 0
@@ -218,7 +221,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
             errors = relogins = 0
             if not dates:
                 empty_streak += 1
-                log.warning("Sin fechas disponibles (%d seguidas).", empty_streak)
+                log.warning("No dates available (%d in a row).", empty_streak)
                 if report:
                     notify(":large_yellow_circle: *Visa bot running* - the consulate shows no open dates "
                            f"right now.\nYour current appointment: {current_date:%b %d, %Y}")
@@ -226,7 +229,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 empty_streak = blocks = 0
                 earliest = dates[0]
                 earlier = [d for d in dates if d < current_date]
-                log.info("Fecha mas proxima: %s | %d fechas antes de tu cita (%s)",
+                log.info("Earliest available: %s | %d dates before your appointment (%s)",
                          earliest, len(earlier), current_date)
                 if earlier and (best_notified is None or earliest < best_notified):
                     best_notified = earliest
@@ -246,12 +249,12 @@ def run(once: bool, headless: bool, report: bool) -> int:
             if empty_streak >= EMPTY_LIMIT:
                 blocks += 1
                 if blocks >= MAX_BLOCKS:
-                    log.warning("Sigue pareciendo bloqueado. Deteniendo.")
+                    log.warning("Still looks blocked. Stopping.")
                     notify_stop("The site still looks rate-limited after a pause. Stopping this run "
                                 "to let the block clear.\nThe next scheduled run will try again; "
                                 "consider raising `CHECK_INTERVAL_MINUTES`.")
                     return 1
-                log.warning("Posible bloqueo temporal. Pausando %d horas.", BACKOFF_HOURS)
+                log.warning("Possible temporary block. Pausing %d hours.", BACKOFF_HOURS)
                 notify(f":large_yellow_circle: Visa bot: the site looks rate-limited (no dates "
                        f"{EMPTY_LIMIT} times in a row). Pausing {BACKOFF_HOURS} hours.")
                 empty_streak = 0
@@ -264,11 +267,11 @@ def run(once: bool, headless: bool, report: bool) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--once", action="store_true", help="una sola revision")
-    ap.add_argument("--test", action="store_true", help="enviar mensaje de prueba a Slack")
-    ap.add_argument("--report", action="store_true", help="enviar a Slack el estado de la primera revision")
-    ap.add_argument("--show", action="store_true", help="mostrar el navegador")
+    ap = argparse.ArgumentParser(description="US visa appointment monitor (notify only)")
+    ap.add_argument("--once", action="store_true", help="single check")
+    ap.add_argument("--test", action="store_true", help="send a test message to Slack")
+    ap.add_argument("--report", action="store_true", help="post the status of the first check to Slack")
+    ap.add_argument("--show", action="store_true", help="show the browser window")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
@@ -280,7 +283,7 @@ def main() -> None:
     try:
         sys.exit(run(args.once, headless=not args.show, report=args.report or args.once))
     except KeyboardInterrupt:
-        log.info("Detenido.")
+        log.info("Stopped.")
 
 
 if __name__ == "__main__":
