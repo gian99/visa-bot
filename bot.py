@@ -87,10 +87,11 @@ def notify(text: str, header: str | None = None) -> None:
     if header:
         # `text` stays as the push-notification fallback
         payload["text"] = f"{header}\n{text}"
-        payload["blocks"] = [
+        # Inside a green attachment so the message gets a green side bar
+        payload["attachments"] = [{"color": "#2eb67d", "blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
             {"type": "section", "text": {"type": "mrkdwn", "text": text}},
-        ]
+        ]}]
     try:
         requests.post(SLACK_WEBHOOK, json=payload, timeout=15).raise_for_status()
     except requests.RequestException as e:
@@ -249,7 +250,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
                            f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
                            f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
                            f"(log in and it opens the reschedule page directly)",
-                           header=":rotating_light: APPOINTMENT FOUND! :rotating_light:")
+                           header=":white_check_mark: APPOINTMENT FOUND! :white_check_mark:")
                 elif not earlier:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
