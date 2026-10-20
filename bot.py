@@ -240,7 +240,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
                            f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
                            f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
                            f"(log in and it opens the reschedule page directly)")
-                elif report and not earlier:
+                elif not earlier:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
                            f"Your current appointment: {current_date:%b %d, %Y}")
