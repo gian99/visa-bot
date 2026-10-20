@@ -77,13 +77,22 @@ class LoginFailed(Exception):
     pass
 
 
-def notify(text: str) -> None:
-    log.info("NOTIFY: %s", text)
+def notify(text: str, header: str | None = None) -> None:
+    """Post to Slack. With `header`, the message gets a large title block."""
+    log.info("NOTIFY: %s%s", f"{header} | " if header else "", text)
     if not SLACK_WEBHOOK:
         log.warning("SLACK_WEBHOOK_URL not set; notification not sent.")
         return
+    payload = {"text": text}
+    if header:
+        # `text` stays as the push-notification fallback
+        payload["text"] = f"{header}\n{text}"
+        payload["blocks"] = [
+            {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+        ]
     try:
-        requests.post(SLACK_WEBHOOK, json={"text": text}, timeout=15).raise_for_status()
+        requests.post(SLACK_WEBHOOK, json=payload, timeout=15).raise_for_status()
     except requests.RequestException as e:
         log.error("Could not post to Slack: %s", e)
 
@@ -236,10 +245,11 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 if earlier and (best_notified is None or earliest < best_notified):
                     best_notified = earliest
                     preview = ", ".join(d.strftime("%b %d, %Y") for d in earlier[:5])
-                    notify(f":white_check_mark: :rotating_light: *Appointment found! Earlier date available in Lima*\n"
+                    notify(f"<!channel> *Earlier date available in Lima*\n"
                            f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
                            f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
-                           f"(log in and it opens the reschedule page directly)")
+                           f"(log in and it opens the reschedule page directly)",
+                           header=":rotating_light: APPOINTMENT FOUND! :rotating_light:")
                 elif not earlier:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
