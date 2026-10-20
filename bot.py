@@ -176,9 +176,9 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 errors += 1
                 log.error("Error en la revision: %s", e)
                 if errors == 3:
-                    notify(f":warning: Visa bot: 3 errores seguidos, revisa los logs. Ultimo: {e}")
+                    notify(f":warning: Visa bot: 3 checks failed in a row, check the logs. Last error: {e}")
                 if once:
-                    notify(f":warning: *Visa bot: la revision fallo*\n{str(e).splitlines()[0]}")
+                    notify(f":warning: *Visa bot: check failed*\n{str(e).splitlines()[0]}")
                     return 1
                 if not wait(INTERVAL_MIN * 2):
                     return 0
@@ -189,8 +189,8 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 empty_streak += 1
                 log.warning("Sin fechas disponibles (%d seguidas).", empty_streak)
                 if report:
-                    notify(":large_yellow_circle: *Visa bot activo* - el consulado no muestra fechas libres "
-                           f"ahora mismo.\nTu cita actual: {current_date:%d/%m/%Y}")
+                    notify(":large_yellow_circle: *Visa bot running* - the consulate shows no open dates "
+                           f"right now.\nYour current appointment: {current_date:%b %d, %Y}")
             else:
                 empty_streak = 0
                 earliest = dates[0]
@@ -199,14 +199,14 @@ def run(once: bool, headless: bool, report: bool) -> int:
                          earliest, len(earlier), current_date)
                 if earlier and (best_notified is None or earliest < best_notified):
                     best_notified = earliest
-                    preview = ", ".join(d.strftime("%d/%m/%Y") for d in earlier[:5])
-                    notify(f":white_check_mark: :rotating_light: *Cita encontrada! Hay fecha mas temprana en Lima*\n"
-                           f"Fechas: {preview}\nTu cita actual: {current_date:%d/%m/%Y}\n"
-                           f"Reprograma aqui: {APPOINTMENT_URL}")
+                    preview = ", ".join(d.strftime("%b %d, %Y") for d in earlier[:5])
+                    notify(f":white_check_mark: :rotating_light: *Appointment found! Earlier date available in Lima*\n"
+                           f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
+                           f"Reschedule here: {APPOINTMENT_URL}")
                 elif report and not earlier:
-                    notify(f":red_circle: *Sin citas antes de tu fecha*\n"
-                           f"Fecha mas proxima disponible: {earliest:%d/%m/%Y}\n"
-                           f"Tu cita actual: {current_date:%d/%m/%Y}")
+                    notify(f":red_circle: *No dates before your appointment*\n"
+                           f"Earliest available: {earliest:%b %d, %Y}\n"
+                           f"Your current appointment: {current_date:%b %d, %Y}")
             report = False
 
             if once:
@@ -234,8 +234,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         datefmt="%Y-%m-%d %H:%M:%S")
     if args.test:
-        notify(":white_check_mark: Visa bot conectado. Te avisare aqui si aparece una cita "
-               "antes de la que tienes ahora.")
+        notify(":white_check_mark: Visa bot connected. I'll post here when an appointment "
+               "earlier than your current one shows up.")
         return
     try:
         sys.exit(run(args.once, headless=not args.show, report=args.report or args.once))
