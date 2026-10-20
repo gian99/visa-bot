@@ -2,14 +2,14 @@ name: visa-bot
 
 on:
   schedule:
-    # Cada 6 horas arranca una ejecucion que revisa cada ~10 min durante ~5h35m.
-    # La de las 12:00 UTC (07:00 Lima) ademas manda el resumen diario a Slack.
+    # Every 6 hours a run starts and checks every ~10 min for ~5h35m.
+    # The 12:00 UTC run (07:00 Lima) also posts the daily summary to Slack.
     - cron: "0 0,6,18 * * *"
     - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "loop = normal | once = una revision | test = mensaje de prueba a Slack"
+        description: "loop = keep watching | once = single check | test = Slack test message"
         default: once
         type: choice
         options: [once, test, loop]
