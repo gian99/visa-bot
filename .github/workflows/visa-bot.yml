@@ -1,0 +1,46 @@
+name: visa-bot
+
+on:
+  schedule:
+    # Cada 6 horas arranca una ejecucion que revisa cada ~10 min durante ~5h40m.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "loop = normal | once = una revision | test = mensaje de prueba a Slack"
+        default: once
+        type: choice
+        options: [once, test, loop]
+
+concurrency:
+  group: visa-bot
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      VISA_EMAIL: ${{ secrets.VISA_EMAIL }}
+      VISA_PASSWORD: ${{ secrets.VISA_PASSWORD }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SCHEDULE_ID: ${{ vars.SCHEDULE_ID }}
+      CURRENT_APPOINTMENT_DATE: ${{ vars.CURRENT_APPOINTMENT_DATE }}
+      COUNTRY_CODE: ${{ vars.COUNTRY_CODE }}
+      CHECK_INTERVAL_MINUTES: ${{ vars.CHECK_INTERVAL_MINUTES }}
+      MAX_RUNTIME_MINUTES: "335"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Run bot
+        run: |
+          case "${{ inputs.mode || 'loop' }}" in
+            test) python bot.py --test ;;
+            once) python bot.py --once ;;
+            *)    python bot.py ;;
+          esac
