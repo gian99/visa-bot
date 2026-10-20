@@ -44,5 +44,6 @@ jobs:
           case "${{ inputs.mode || 'loop' }}" in
             test) python bot.py --test ;;
             once) python bot.py --once ;;
-            *)    python bot.py ${{ github.event.schedule == '0 12 * * *' && '--report' || '' }} ;;
+            # Manual loop runs and the daily 12:00 UTC run post the first check's status
+            *)    python bot.py ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 12 * * *') && '--report' || '' }} ;;
           esac
