@@ -7,6 +7,7 @@ Uso:
     python bot.py          # corre en bucle (hasta MAX_RUNTIME_MINUTES si esta definido)
     python bot.py --once   # una sola revision
     python bot.py --test   # solo envia un mensaje de prueba a Slack
+    python bot.py --report # ademas manda a Slack el estado de la primera revision
     python bot.py --show   # muestra el navegador (debug local)
 """
 
@@ -150,7 +151,7 @@ def wait(minutes: float) -> bool:
     return True
 
 
-def run(once: bool, headless: bool) -> int:
+def run(once: bool, headless: bool, report: bool) -> int:
     best_notified: date | None = None
     empty_streak = 0
     errors = 0
@@ -177,6 +178,7 @@ def run(once: bool, headless: bool) -> int:
                 if errors == 3:
                     notify(f":warning: Visa bot: 3 errores seguidos, revisa los logs. Ultimo: {e}")
                 if once:
+                    notify(f":warning: *Visa bot: la revision fallo*\n{str(e).splitlines()[0]}")
                     return 1
                 if not wait(INTERVAL_MIN * 2):
                     return 0
@@ -186,6 +188,9 @@ def run(once: bool, headless: bool) -> int:
             if not dates:
                 empty_streak += 1
                 log.warning("Sin fechas disponibles (%d seguidas).", empty_streak)
+                if report:
+                    notify(":large_yellow_circle: *Visa bot activo* - el consulado no muestra fechas libres "
+                           f"ahora mismo.\nTu cita actual: {current_date:%d/%m/%Y}")
             else:
                 empty_streak = 0
                 earliest = dates[0]
@@ -195,9 +200,14 @@ def run(once: bool, headless: bool) -> int:
                 if earlier and (best_notified is None or earliest < best_notified):
                     best_notified = earliest
                     preview = ", ".join(d.strftime("%d/%m/%Y") for d in earlier[:5])
-                    notify(f":rotating_light: *Hay cita de visa mas temprana en Lima!*\n"
+                    notify(f":white_check_mark: :rotating_light: *Cita encontrada! Hay fecha mas temprana en Lima*\n"
                            f"Fechas: {preview}\nTu cita actual: {current_date:%d/%m/%Y}\n"
                            f"Reprograma aqui: {APPOINTMENT_URL}")
+                elif report and not earlier:
+                    notify(f":red_circle: *Sin citas antes de tu fecha*\n"
+                           f"Fecha mas proxima disponible: {earliest:%d/%m/%Y}\n"
+                           f"Tu cita actual: {current_date:%d/%m/%Y}")
+            report = False
 
             if once:
                 return 0
@@ -217,6 +227,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="una sola revision")
     ap.add_argument("--test", action="store_true", help="enviar mensaje de prueba a Slack")
+    ap.add_argument("--report", action="store_true", help="enviar a Slack el estado de la primera revision")
     ap.add_argument("--show", action="store_true", help="mostrar el navegador")
     args = ap.parse_args()
 
@@ -227,7 +238,7 @@ def main() -> None:
                "antes de la que tienes ahora.")
         return
     try:
-        sys.exit(run(args.once, headless=not args.show))
+        sys.exit(run(args.once, headless=not args.show, report=args.report or args.once))
     except KeyboardInterrupt:
         log.info("Detenido.")
 

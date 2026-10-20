@@ -2,8 +2,10 @@ name: visa-bot
 
 on:
   schedule:
-    # Cada 6 horas arranca una ejecucion que revisa cada ~10 min durante ~5h40m.
-    - cron: "0 */6 * * *"
+    # Cada 6 horas arranca una ejecucion que revisa cada ~10 min durante ~5h35m.
+    # La de las 12:00 UTC (07:00 Lima) ademas manda el resumen diario a Slack.
+    - cron: "0 0,6,18 * * *"
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -42,5 +44,5 @@ jobs:
           case "${{ inputs.mode || 'loop' }}" in
             test) python bot.py --test ;;
             once) python bot.py --once ;;
-            *)    python bot.py ;;
+            *)    python bot.py ${{ github.event.schedule == '0 12 * * *' && '--report' || '' }} ;;
           esac
