@@ -81,6 +81,8 @@ GitHub may start scheduled runs a few minutes late.
 | Manual `once` run | 🔴 / ✅ with the result of that check |
 | Consulate shows no dates at all | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
 | 3 failed checks in a row, or a failed manual run | ⚠️ with the error |
+| Site looks rate-limited (3 empty responses in a row) | 🟡 **Pausing 3 hours** |
+| The run stops itself (see [Automatic stops](#automatic-stops)) | 🛑 **Visa bot stopped**, with the reason and a link to the run |
 | Manual `test` run | ✅ **Visa bot connected** |
 
 > **Tip:** In Slack, open the channel → click its name → **Notifications** → **All new messages**,
@@ -212,6 +214,19 @@ The bot is built to stay well below that:
   The server drops requests made instantly after page load.
 - It uses a regular Chrome user agent. The site returns `403` to the default `HeadlessChrome` one.
 
+### Automatic stops
+
+The current run ends itself, and you get a 🛑 message in Slack, when:
+
+| Situation | Why it stops |
+|---|---|
+| **Login fails** (wrong email/password) | Retrying could lock your portal account. Update `VISA_PASSWORD`, or disable the workflow until you do. Otherwise each scheduled run makes one login attempt |
+| **Still rate-limited after the 3-hour pause** | Continuing would extend the block. The next scheduled run tries again |
+| **5 failed checks in a row** (other errors) | Something is broken (site down, page changed). The next scheduled run tries again |
+
+To stop everything, including future scheduled runs, disable the workflow (see
+[Running and controlling the bot](#running-and-controlling-the-bot)).
+
 **Choosing an interval:** start with `10`. If a week goes by without ⚠️ or 🟡 messages,
 you can try `7`. Going below `5` is not recommended.
 
@@ -222,7 +237,7 @@ you can try `7`. Going below `5` is not recommended.
 | Symptom | Likely cause / fix |
 |---|---|
 | `KeyError: 'SCHEDULE_ID'` (or another variable) | Missing or misspelled secret/variable. `SCHEDULE_ID` must be under **Variables**; email, password and webhook under **Secrets** |
-| `Login fallido: revisa usuario/clave` | Wrong email or password, or the password changed. Update `VISA_PASSWORD` |
+| `Login fallido: revisa usuario/clave` (🛑 in Slack) | Wrong email or password, or the password changed. Update `VISA_PASSWORD`. The bot doesn't retry within the run |
 | `Timeout ... waiting for locator("#user_email")` | The sign-in page didn't load, possibly a `403` or the site being down. Try again later |
 | `socket hang up` / `Failed to fetch` | Transient network drop. The bot retries automatically |
 | Repeated 🟡 / empty results | Probably rate-limited. The bot backs off on its own; consider raising `CHECK_INTERVAL_MINUTES` |

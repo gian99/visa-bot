@@ -54,6 +54,14 @@ MONTHS_ES = {m: i for i, m in enumerate(
      "septiembre", "octubre", "noviembre", "diciembre"], start=1)}
 MONTHS_ES["setiembre"] = 9
 BACKOFF_HOURS = 3
+# Si vuelve a parecer bloqueado tras la pausa, o hay demasiados errores seguidos,
+# se detiene la ejecucion para no empeorar el bloqueo.
+MAX_BLOCKS = 2
+MAX_ERRORS = 5
+
+# Enlace a la ejecucion actual de GitHub Actions (vacio si se corre localmente)
+RUN_URL = (f"{os.getenv('GITHUB_SERVER_URL')}/{os.getenv('GITHUB_REPOSITORY')}"
+           f"/actions/runs/{os.getenv('GITHUB_RUN_ID')}" if os.getenv("GITHUB_RUN_ID") else "")
 
 log = logging.getLogger("visa-bot")
 START = time.monotonic()
@@ -61,6 +69,15 @@ START = time.monotonic()
 
 class SessionExpired(Exception):
     pass
+
+
+class LoginFailed(Exception):
+    pass
+
+
+def notify_stop(reason: str) -> None:
+    link = f"\nRun: {RUN_URL}" if RUN_URL else ""
+    notify(f":octagonal_sign: *Visa bot stopped*\n{reason}{link}")
 
 
 def notify(text: str) -> None:
@@ -100,7 +117,7 @@ def login(page: Page) -> tuple[str, date]:
     page.click("input[name=commit]")
     page.wait_for_load_state("networkidle")
     if "sign_in" in page.url:
-        raise RuntimeError("Login fallido: revisa usuario/clave")
+        raise LoginFailed("Login fallido: revisa usuario/clave")
     current = read_current_appointment(page)
 
     page.goto(APPOINTMENT_URL, wait_until="domcontentloaded")
@@ -156,6 +173,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
     empty_streak = 0
     errors = 0
     relogins = 0
+    blocks = 0
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -167,6 +185,13 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 if facility_id is None:
                     facility_id, current_date = login(page)
                 dates = fetch_dates(page, facility_id)
+            except LoginFailed as e:
+                # No reintentar: varios intentos fallidos pueden bloquear la cuenta
+                log.error("%s. Deteniendo.", e)
+                notify_stop("Login failed: wrong email or password. Not retrying, to avoid locking "
+                            "the account.\nUpdate the `VISA_PASSWORD` secret, or disable the workflow "
+                            "until you do (scheduled runs will try again).")
+                return 1
             except Exception as e:  # noqa: BLE001
                 facility_id = None
                 if relogins == 0:
@@ -175,8 +200,14 @@ def run(once: bool, headless: bool, report: bool) -> int:
                     continue
                 errors += 1
                 log.error("Error en la revision: %s", e)
+                first_line = str(e).splitlines()[0]
                 if errors == 3:
-                    notify(f":warning: Visa bot: 3 checks failed in a row, check the logs. Last error: {e}")
+                    notify(f":warning: Visa bot: 3 checks failed in a row, will keep retrying. "
+                           f"Last error: {first_line}")
+                if errors >= MAX_ERRORS:
+                    notify_stop(f"{MAX_ERRORS} checks failed in a row. Last error: {first_line}\n"
+                                "The next scheduled run will try again.")
+                    return 1
                 if once:
                     notify(f":warning: *Visa bot: check failed*\n{str(e).splitlines()[0]}")
                     return 1
@@ -192,7 +223,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
                     notify(":large_yellow_circle: *Visa bot running* - the consulate shows no open dates "
                            f"right now.\nYour current appointment: {current_date:%b %d, %Y}")
             else:
-                empty_streak = 0
+                empty_streak = blocks = 0
                 earliest = dates[0]
                 earlier = [d for d in dates if d < current_date]
                 log.info("Fecha mas proxima: %s | %d fechas antes de tu cita (%s)",
@@ -213,7 +244,16 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 return 0
 
             if empty_streak >= EMPTY_LIMIT:
+                blocks += 1
+                if blocks >= MAX_BLOCKS:
+                    log.warning("Sigue pareciendo bloqueado. Deteniendo.")
+                    notify_stop("The site still looks rate-limited after a pause. Stopping this run "
+                                "to let the block clear.\nThe next scheduled run will try again; "
+                                "consider raising `CHECK_INTERVAL_MINUTES`.")
+                    return 1
                 log.warning("Posible bloqueo temporal. Pausando %d horas.", BACKOFF_HOURS)
+                notify(f":large_yellow_circle: Visa bot: the site looks rate-limited (no dates "
+                       f"{EMPTY_LIMIT} times in a row). Pausing {BACKOFF_HOURS} hours.")
                 empty_streak = 0
                 facility_id = None
                 ok = wait(BACKOFF_HOURS * 60)
