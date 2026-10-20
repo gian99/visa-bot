@@ -78,21 +78,22 @@ class LoginFailed(Exception):
 
 
 def notify(text: str, header: str | None = None, ping: bool = False) -> None:
-    """Post to Slack. With `header`, the message gets a large title in a green
-    box; `ping` adds @channel so it pushes to phones even if the channel is muted."""
+    """Post to Slack. With `header`, the message gets a large title block;
+    `ping` adds @channel so it pushes to phones even if the channel is muted."""
+    if ping:
+        text = f"<!channel> {text}"
     log.info("NOTIFY: %s%s", f"{header} | " if header else "", text)
     if not SLACK_WEBHOOK:
         log.warning("SLACK_WEBHOOK_URL not set; notification not sent.")
         return
     payload = {"text": text}
     if header:
-        # Slack shows the top-level text above the box, so keep it to the mention
-        # only; `fallback` is what the phone notification shows.
-        payload["text"] = "<!channel>" if ping else ""
-        payload["attachments"] = [{"color": "#2eb67d", "fallback": f"{header}\n{text}", "blocks": [
+        # With blocks, `text` is only the phone-notification fallback
+        payload["text"] = f"{header}\n{text}"
+        payload["blocks"] = [
             {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
             {"type": "section", "text": {"type": "mrkdwn", "text": text}},
-        ]}]
+        ]
     try:
         requests.post(SLACK_WEBHOOK, json=payload, timeout=15).raise_for_status()
     except requests.RequestException as e:

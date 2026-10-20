@@ -76,7 +76,7 @@ GitHub may start scheduled runs a few minutes late.
 
 | When | Message |
 |---|---|
-| An earlier date is found | ✅ **APPOINTMENT FOUND!** as a large title with a green side bar, `@channel` (pushes to your phone even if the channel is muted), with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
+| An earlier date is found | ✅ **APPOINTMENT FOUND!** as a large title, `@channel` (pushes to your phone even if the channel is muted), with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
 | Every check with no earlier date (~every 10 min) | 🔴 **No dates before your appointment**, with the earliest available date |
 | Consulate shows no dates at all, on a manual run or the daily ~07:00 Lima run | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
 | 3 failed checks in a row, or a failed manual run | ⚠️ with the error |
