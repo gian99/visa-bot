@@ -76,7 +76,7 @@ GitHub may start scheduled runs a few minutes late.
 
 | When | Message |
 |---|---|
-| An earlier date is found | ✅🚨 **Appointment found! Earlier date available in Lima**, with the dates, your current appointment and a link to reschedule |
+| An earlier date is found | ✅🚨 **Appointment found! Earlier date available in Lima**, with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
 | Every day at ~07:00 Lima | 🔴 **No dates before your appointment**, with the earliest available date (shows the bot is alive) |
 | Manual `once` run | 🔴 / ✅ with the result of that check |
 | Consulate shows no dates at all | 🟡 **Visa bot running**, but the consulate shows no open dates right now |

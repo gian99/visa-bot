@@ -116,7 +116,9 @@ def login(page: Page) -> tuple[str, date]:
     page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
     page.fill("#user_email", EMAIL)
     page.fill("#user_password", PASSWORD)
-    page.check("#policy_confirmed", force=True)
+    # The checkbox is wrapped by a JS widget (iCheck) that sometimes swallows clicks,
+    # so set it directly.
+    page.locator("#policy_confirmed").evaluate("el => { el.checked = true; }")
     page.click("input[name=commit]")
     page.wait_for_load_state("networkidle")
     if "sign_in" in page.url:
@@ -236,7 +238,8 @@ def run(once: bool, headless: bool, report: bool) -> int:
                     preview = ", ".join(d.strftime("%b %d, %Y") for d in earlier[:5])
                     notify(f":white_check_mark: :rotating_light: *Appointment found! Earlier date available in Lima*\n"
                            f"Dates: {preview}\nYour current appointment: {current_date:%b %d, %Y}\n"
-                           f"Reschedule here: {APPOINTMENT_URL}")
+                           f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
+                           f"(log in and it opens the reschedule page directly)")
                 elif report and not earlier:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
