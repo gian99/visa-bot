@@ -90,6 +90,8 @@ def read_current_appointment(page: Page) -> date:
 def login(page: Page) -> tuple[str, date]:
     """Inicia sesion y devuelve (facility_id del consulado, fecha de la cita actual)."""
     log.info("Iniciando sesion...")
+    # Empezar siempre con una sesion limpia, aunque se este reintentando
+    page.context.clear_cookies()
     page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
     page.fill("#user_email", EMAIL)
     page.fill("#user_password", PASSWORD)
@@ -104,8 +106,8 @@ def login(page: Page) -> tuple[str, date]:
     facility = page.locator("#appointments_consulate_appointment_facility_id")
     facility.wait_for(state="attached", timeout=30_000)
     facility_id = facility.input_value()
-    # Esperar a que la pagina termine sus propias peticiones antes de usar fetch()
-    page.wait_for_load_state("networkidle")
+    # El servidor corta consultas hechas justo despues de cargar la pagina
+    page.wait_for_timeout(random.uniform(4, 7) * 1000)
     log.info("Sesion iniciada. Consulado: %s (id %s). Cita actual: %s",
              facility.locator("option:checked").inner_text().strip(), facility_id, current)
     return facility_id, current
@@ -113,18 +115,25 @@ def login(page: Page) -> tuple[str, date]:
 
 def fetch_dates(page: Page, facility_id: str) -> list[date]:
     url = f"{BASE}/schedule/{SCHEDULE_ID}/appointment/days/{facility_id}.json?appointments[expedite]=false"
-    res = page.evaluate(
-        """async (url) => {
-            const r = await fetch(url, {headers: {
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'X-Requested-With': 'XMLHttpRequest'}});
-            return {status: r.status, text: await r.text()};
-        }""",
-        url,
-    )
-    if res["status"] in (401, 403) or res["text"].lstrip().startswith("<"):
-        raise SessionExpired(f"HTTP {res['status']}")
-    data = json.loads(res["text"])
+    # Peticion directa con las cookies de la sesion (no depende del estado de la pagina)
+    headers = {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": APPOINTMENT_URL,
+    }
+    for attempt in range(3):
+        try:
+            res = page.context.request.get(url, headers=headers)
+            break
+        except Exception as e:  # noqa: BLE001  (p. ej. "socket hang up")
+            if attempt == 2:
+                raise
+            log.info("Corte de red (%s); reintentando...", str(e).splitlines()[0])
+            time.sleep(5 * (attempt + 1))
+    text = res.text()
+    if res.status in (401, 403) or text.lstrip().startswith("<"):
+        raise SessionExpired(f"HTTP {res.status}")
+    data = json.loads(text)
     if isinstance(data, dict) and data.get("error"):
         raise SessionExpired(data["error"])
     return sorted(date.fromisoformat(d["date"]) for d in data)
