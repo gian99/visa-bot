@@ -77,8 +77,8 @@ GitHub may start scheduled runs a few minutes late.
 | When | Message |
 |---|---|
 | An earlier date is found | ✅ **APPOINTMENT FOUND!** as a large title, `@channel` (pushes to your phone even if the channel is muted), with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
-| Every check with no earlier date (~every 10 min) | 🔴 **No dates before your appointment**, with the earliest available date |
-| Consulate shows no dates at all, on a manual run or the daily ~07:00 Lima run | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
+| No earlier date: on a manual run, the daily ~07:00 Lima run, then at most once an hour (`STATUS_EVERY_MINUTES`) | 🔴 **No dates before your appointment**, with the earliest available date and how many checks ran since the last update |
+| Consulate shows no dates at all, same schedule as above | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
 | 3 failed checks in a row, or a failed manual run | ⚠️ with the error |
 | Site looks rate-limited (3 empty responses in a row) | 🟡 **Pausing 3 hours** |
 | The run stops itself (see [Automatic stops](#automatic-stops)) | 🛑 **Visa bot stopped**, with the reason and a link to the run |
@@ -123,6 +123,7 @@ In the repository go to **Settings → Secrets and variables → Actions**.
 | `SCHEDULE_ID` | `12345678` | yes | The number in your reschedule URL: `.../niv/schedule/<SCHEDULE_ID>/appointment` |
 | `COUNTRY_CODE` | `es-pe` | no | Portal locale/country prefix. Default `es-pe` (Peru, Spanish) |
 | `CHECK_INTERVAL_MINUTES` | `10` | no | Minutes between checks (randomized ×0.8–1.4). Default `10` |
+| `STATUS_EVERY_MINUTES` | `60` | no | How often to post a "nothing found" status to Slack. Found dates always post right away. Default `60` |
 | `CURRENT_APPOINTMENT_DATE` | `2027-04-13` | no | Fallback only, used if the bot can't read your appointment from the portal |
 
 ### 3. Test it
@@ -170,6 +171,7 @@ Locally they come from a `.env` file.
 | `SLACK_WEBHOOK_URL` | recommended | – | Slack Incoming Webhook. Without it, results only go to the logs |
 | `COUNTRY_CODE` | no | `es-pe` | Portal country/locale prefix |
 | `CHECK_INTERVAL_MINUTES` | no | `10` | Base interval between checks |
+| `STATUS_EVERY_MINUTES` | no | `60` | Minimum minutes between "nothing found" Slack posts |
 | `CURRENT_APPOINTMENT_DATE` | no | – | Fallback `YYYY-MM-DD` if reading it from the portal fails |
 | `MAX_RUNTIME_MINUTES` | no | `0` (no limit) | Stop the loop after this many minutes. The workflow sets `335` |
 

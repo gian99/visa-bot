@@ -37,6 +37,8 @@ FALLBACK_DATE = os.getenv("CURRENT_APPOINTMENT_DATE") or ""
 INTERVAL_MIN = float(os.getenv("CHECK_INTERVAL_MINUTES") or "10")
 MAX_RUNTIME_MIN = float(os.getenv("MAX_RUNTIME_MINUTES") or "0")  # 0 = no limit
 SLACK_WEBHOOK = (os.getenv("SLACK_WEBHOOK_URL") or "").strip()
+# "Nothing found" status is posted at most this often (found dates always post)
+STATUS_EVERY_MIN = float(os.getenv("STATUS_EVERY_MINUTES") or "60")
 
 BASE = f"https://ais.usvisa-info.com/{COUNTRY}/niv"
 SIGN_IN_URL = f"{BASE}/users/sign_in"
@@ -191,6 +193,8 @@ def run(once: bool, headless: bool, report: bool) -> int:
     errors = 0
     relogins = 0
     blocks = 0
+    last_status: float | None = None  # monotonic time of the last "nothing found" post
+    checks = 0  # checks since the last status post
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -233,12 +237,18 @@ def run(once: bool, headless: bool, report: bool) -> int:
                 continue
 
             errors = relogins = 0
+            checks += 1
+            # Post "nothing found" on the first check if asked, then once per STATUS_EVERY_MIN
+            if last_status is None:
+                last_status = time.monotonic()
+            status_due = report or time.monotonic() - last_status >= STATUS_EVERY_MIN * 60
+            footer = f"\n_{checks} checks since the last update_" if checks > 1 else ""
             if not dates:
                 empty_streak += 1
                 log.warning("No dates available (%d in a row).", empty_streak)
-                if report:
+                if status_due:
                     notify(":large_yellow_circle: *Visa bot running* - the consulate shows no open dates "
-                           f"right now.\nYour current appointment: {current_date:%b %d, %Y}")
+                           f"right now.\nYour current appointment: {current_date:%b %d, %Y}{footer}")
             else:
                 empty_streak = blocks = 0
                 earliest = dates[0]
@@ -253,10 +263,13 @@ def run(once: bool, headless: bool, report: bool) -> int:
                            f":point_right: *<{APPOINTMENT_URL}|Reschedule now>* "
                            f"(log in and it opens the reschedule page directly)",
                            header=":white_check_mark: APPOINTMENT FOUND! :white_check_mark:", ping=True)
-                elif not earlier:
+                elif not earlier and status_due:
                     notify(f":red_circle: *No dates before your appointment*\n"
                            f"Earliest available: {earliest:%b %d, %Y}\n"
-                           f"Your current appointment: {current_date:%b %d, %Y}")
+                           f"Your current appointment: {current_date:%b %d, %Y}{footer}")
+            if status_due:
+                last_status = time.monotonic()
+                checks = 0
             report = False
 
             if once:

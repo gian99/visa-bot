@@ -30,6 +30,7 @@ jobs:
       CURRENT_APPOINTMENT_DATE: ${{ vars.CURRENT_APPOINTMENT_DATE }}
       COUNTRY_CODE: ${{ vars.COUNTRY_CODE }}
       CHECK_INTERVAL_MINUTES: ${{ vars.CHECK_INTERVAL_MINUTES }}
+      STATUS_EVERY_MINUTES: ${{ vars.STATUS_EVERY_MINUTES }}
       MAX_RUNTIME_MINUTES: "335"
     steps:
       - uses: actions/checkout@v4
