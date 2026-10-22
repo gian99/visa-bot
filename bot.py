@@ -127,11 +127,9 @@ def record(dates: list[date]) -> None:
         log.error("Could not write %s: %s", HISTORY_FILE, e)
 
 
-def daily_summary() -> None:
-    """Post the earliest date seen on each of the last days (Lima time)."""
-    if not HISTORY_FILE.exists():
-        log.info("No history yet; skipping the daily summary.")
-        return
+def load_history() -> tuple[dict[date, dict], tuple[date, date] | None]:
+    """Per Lima day: checks, empty checks, earliest date and when it was first seen.
+    Also the best (earliest date, day seen) over the whole history."""
     days: dict[date, dict] = {}
     best = None  # (earliest date, day it was seen) over the whole history
     with HISTORY_FILE.open(newline="") as f:
@@ -147,8 +145,17 @@ def daily_summary() -> None:
                 day["earliest"], day["seen"] = earliest, t
             if best is None or earliest < best[0]:
                 best = (earliest, t.date())
+    return days, best
+
+
+def daily_summary() -> None:
+    """Post the earliest date seen on each of the last days (Lima time)."""
+    if not HISTORY_FILE.exists():
+        log.info("No history yet; skipping the daily summary.")
+        return
+    days, best = load_history()
     today = datetime.now(LIMA).date()
-    lines = [f"{'Day':<8}{'Earliest':<14}{'Seen':<6}{'Checks':>7}{'Empty':>6}"]
+    lines =[f"{'Day':<8}{'Earliest':<14}{'Seen':<6}{'Checks':>7}{'Empty':>6}"]
     for d in sorted(days, reverse=True)[:SUMMARY_DAYS]:
         s = days[d]
         earliest = f"{s['earliest']:%b %d, %Y}  {s['seen']:%H:%M}" if s["earliest"] else f"{'-':<19}"
@@ -158,6 +165,30 @@ def daily_summary() -> None:
     note = "\n_* today so far_" if today in days else ""
     overall = f"\nBest since tracking started: *{best[0]:%b %d, %Y}* (seen {best[1]:%b %d})" if best else ""
     notify(f":bar_chart: *Earliest available date per day* (Lima time)\n```{table}```{note}{overall}")
+
+
+def job_summary() -> None:
+    """Show the same table on the GitHub Actions run page."""
+    out = os.getenv("GITHUB_STEP_SUMMARY")
+    if not out or not HISTORY_FILE.exists():
+        return
+    days, best = load_history()
+    today = datetime.now(LIMA).date()
+    lines = ["## Earliest available date per day (Lima time)", "",
+             "| Day | Earliest | First seen | Checks | Empty |", "|---|---|---:|---:|---:|"]
+    for d in sorted(days, reverse=True)[:SUMMARY_DAYS]:
+        s = days[d]
+        earliest, seen = ((f"{s['earliest']:%b %d, %Y}", f"{s['seen']:%H:%M}") if s["earliest"]
+                          else ("-", "-"))
+        label = f"{d:%b %d}" + (" (today so far)" if d == today else "")
+        lines.append(f"| {label} | {earliest} | {seen} | {s['checks']} | {s['empty']} |")
+    if best:
+        lines += ["", f"Best since tracking started: **{best[0]:%b %d, %Y}** (seen {best[1]:%b %d})"]
+    try:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as e:
+        log.error("Could not write the job summary: %s", e)
 
 
 def read_current_appointment(page: Page) -> date:
@@ -370,6 +401,8 @@ def main() -> None:
                      summary=args.report))
     except KeyboardInterrupt:
         log.info("Stopped.")
+    finally:
+        job_summary()
 
 
 if __name__ == "__main__":

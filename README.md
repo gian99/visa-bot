@@ -196,6 +196,7 @@ Your own appointment date is not stored.
 On GitHub the file lives on a separate **`stats`** branch, so `main` stays clean.
 Each run loads it at the start and commits it back when it ends (also when it's cancelled).
 To browse it or download it for your own charts, switch to the `stats` branch on GitHub.
+Each run's page in **Actions** also shows the last 7 days as a table (job summary).
 The repository is public, so this file is public too.
 
 ---
