@@ -1,3 +1,4 @@
 .env
+history.csv
 __pycache__/
 *.log

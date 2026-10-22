@@ -64,7 +64,7 @@ GitHub Actions (cron, every 6h)
 |---|---|---|
 | 00:00 | 19:00 | |
 | 06:00 | 01:00 | |
-| 12:00 | 07:00 | Also posts 🟡 if the first check finds no dates at all |
+| 12:00 | 07:00 | Also posts the 📊 daily summary and the first check's status |
 | 18:00 | 13:00 | |
 
 Each run checks for about **5h35m**, then exits so the next scheduled run can start.
@@ -77,7 +77,8 @@ GitHub may start scheduled runs a few minutes late.
 | When | Message |
 |---|---|
 | An earlier date is found | ✅ **APPOINTMENT FOUND!** as a large title, `@channel` (pushes to your phone even if the channel is muted), with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
-| No earlier date: on a manual run, the daily ~07:00 Lima run, then at most once an hour (`STATUS_EVERY_MINUTES`) | 🔴 **No dates before your appointment**, with the earliest available date and how many checks ran since the last update |
+| Every day at ~07:00 Lima, and when you start a manual `loop` run | 📊 **Earliest available date per day** for the last 7 days: the earliest date seen, when it was first seen, and how many checks ran (and came back empty). Also the best date since tracking started |
+| No earlier date: on a manual run, the daily ~07:00 Lima run, then at most every 3 hours (`STATUS_EVERY_MINUTES`) | 🔴 **No dates before your appointment**, with the earliest available date and how many checks ran since the last update |
 | Consulate shows no dates at all, same schedule as above | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
 | 3 failed checks in a row, or a failed manual run | ⚠️ with the error |
 | Site looks rate-limited (3 empty responses in a row) | 🟡 **Pausing 3 hours** |
@@ -123,7 +124,7 @@ In the repository go to **Settings → Secrets and variables → Actions**.
 | `SCHEDULE_ID` | `12345678` | yes | The number in your reschedule URL: `.../niv/schedule/<SCHEDULE_ID>/appointment` |
 | `COUNTRY_CODE` | `es-pe` | no | Portal locale/country prefix. Default `es-pe` (Peru, Spanish) |
 | `CHECK_INTERVAL_MINUTES` | `10` | no | Minutes between checks (randomized ×0.8–1.4). Default `10` |
-| `STATUS_EVERY_MINUTES` | `60` | no | How often to post a "nothing found" status to Slack. Found dates always post right away. Default `60` |
+| `STATUS_EVERY_MINUTES` | `180` | no | How often to post a "nothing found" status to Slack. Found dates always post right away. Default `180` |
 | `CURRENT_APPOINTMENT_DATE` | `2027-04-13` | no | Fallback only, used if the bot can't read your appointment from the portal |
 
 ### 3. Test it
@@ -171,7 +172,8 @@ Locally they come from a `.env` file.
 | `SLACK_WEBHOOK_URL` | recommended | – | Slack Incoming Webhook. Without it, results only go to the logs |
 | `COUNTRY_CODE` | no | `es-pe` | Portal country/locale prefix |
 | `CHECK_INTERVAL_MINUTES` | no | `10` | Base interval between checks |
-| `STATUS_EVERY_MINUTES` | no | `60` | Minimum minutes between "nothing found" Slack posts |
+| `STATUS_EVERY_MINUTES` | no | `180` | Minimum minutes between "nothing found" Slack posts |
+| `HISTORY_FILE` | no | `history.csv` | CSV where each check's earliest date is logged. The workflow uses `stats/history.csv` |
 | `CURRENT_APPOINTMENT_DATE` | no | – | Fallback `YYYY-MM-DD` if reading it from the portal fails |
 | `MAX_RUNTIME_MINUTES` | no | `0` (no limit) | Stop the loop after this many minutes. The workflow sets `335` |
 
@@ -180,10 +182,21 @@ Locally they come from a `.env` file.
 ```
 python bot.py            # loop forever (or until MAX_RUNTIME_MINUTES)
 python bot.py --once     # single check; always posts the result to Slack
-python bot.py --report   # loop, and post the status of the first check (daily summary)
+python bot.py --report   # loop, and post the daily summary and the first check's status
 python bot.py --test     # only send a test message to Slack
 python bot.py --show     # show the browser window (local debugging)
 ```
+
+### Check history
+
+Every successful check appends one row to `history.csv`: the time (UTC), the earliest
+available date (empty if the consulate showed none) and how many dates were open.
+Your own appointment date is not stored.
+
+On GitHub the file lives on a separate **`stats`** branch, so `main` stays clean.
+Each run loads it at the start and commits it back when it ends (also when it's cancelled).
+To browse it or download it for your own charts, switch to the `stats` branch on GitHub.
+The repository is public, so this file is public too.
 
 ---
 
@@ -277,7 +290,7 @@ Logs are in **Actions → (run) → check → Run bot**.
 ├── bot.py                         # The bot: login, read appointment, poll dates, notify Slack
 ├── requirements.txt               # Python dependencies (Playwright, requests, python-dotenv)
 ├── .env.example                   # Template for local configuration
-├── .gitignore                     # Keeps .env and logs out of git
+├── .gitignore                     # Keeps .env, history.csv and logs out of git
 └── .github/workflows/visa-bot.yml # GitHub Actions schedule and manual run modes
 ```
 

@@ -7,11 +7,12 @@ Usage:
     python bot.py          # loop (until MAX_RUNTIME_MINUTES, if set)
     python bot.py --once   # single check
     python bot.py --test   # only send a test message to Slack
-    python bot.py --report # also post the status of the first check to Slack
+    python bot.py --report # also post the daily summary and the first check's status to Slack
     python bot.py --show   # show the browser window (local debugging)
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import random
 import re
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -38,7 +39,11 @@ INTERVAL_MIN = float(os.getenv("CHECK_INTERVAL_MINUTES") or "10")
 MAX_RUNTIME_MIN = float(os.getenv("MAX_RUNTIME_MINUTES") or "0")  # 0 = no limit
 SLACK_WEBHOOK = (os.getenv("SLACK_WEBHOOK_URL") or "").strip()
 # "Nothing found" status is posted at most this often (found dates always post)
-STATUS_EVERY_MIN = float(os.getenv("STATUS_EVERY_MINUTES") or "60")
+STATUS_EVERY_MIN = float(os.getenv("STATUS_EVERY_MINUTES") or "180")
+# One CSV row per successful check (earliest date seen), used for the daily summary
+HISTORY_FILE = Path(os.getenv("HISTORY_FILE") or Path(__file__).with_name("history.csv"))
+SUMMARY_DAYS = 7
+LIMA = timezone(timedelta(hours=-5))  # Peru has no daylight saving time
 
 BASE = f"https://ais.usvisa-info.com/{COUNTRY}/niv"
 SIGN_IN_URL = f"{BASE}/users/sign_in"
@@ -105,6 +110,54 @@ def notify(text: str, header: str | None = None, ping: bool = False) -> None:
 def notify_stop(reason: str) -> None:
     link = f"\nRun: {RUN_URL}" if RUN_URL else ""
     notify(f":octagonal_sign: *Visa bot stopped*\n{reason}{link}")
+
+
+def record(dates: list[date]) -> None:
+    """Append this check's result to the history CSV."""
+    try:
+        new = not HISTORY_FILE.exists()
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with HISTORY_FILE.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["time_utc", "earliest", "dates"])
+            w.writerow([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        dates[0].isoformat() if dates else "", len(dates)])
+    except OSError as e:
+        log.error("Could not write %s: %s", HISTORY_FILE, e)
+
+
+def daily_summary() -> None:
+    """Post the earliest date seen on each of the last days (Lima time)."""
+    if not HISTORY_FILE.exists():
+        log.info("No history yet; skipping the daily summary.")
+        return
+    days: dict[date, dict] = {}
+    best = None  # (earliest date, day it was seen) over the whole history
+    with HISTORY_FILE.open(newline="") as f:
+        for row in csv.DictReader(f):
+            t = datetime.fromisoformat(row["time_utc"].replace("Z", "+00:00")).astimezone(LIMA)
+            day = days.setdefault(t.date(), {"checks": 0, "empty": 0, "earliest": None, "seen": None})
+            day["checks"] += 1
+            if not row["earliest"]:
+                day["empty"] += 1
+                continue
+            earliest = date.fromisoformat(row["earliest"])
+            if day["earliest"] is None or earliest < day["earliest"]:
+                day["earliest"], day["seen"] = earliest, t
+            if best is None or earliest < best[0]:
+                best = (earliest, t.date())
+    today = datetime.now(LIMA).date()
+    lines = [f"{'Day':<8}{'Earliest':<14}{'Seen':<6}{'Checks':>7}{'Empty':>6}"]
+    for d in sorted(days, reverse=True)[:SUMMARY_DAYS]:
+        s = days[d]
+        earliest = f"{s['earliest']:%b %d, %Y}  {s['seen']:%H:%M}" if s["earliest"] else f"{'-':<19}"
+        mark = "*" if d == today else " "
+        lines.append(f"{d:%b %d}{mark} {earliest}{s['checks']:>7}{s['empty']:>6}")
+    table = "\n".join(lines)
+    note = "\n_* today so far_" if today in days else ""
+    overall = f"\nBest since tracking started: *{best[0]:%b %d, %Y}* (seen {best[1]:%b %d})" if best else ""
+    notify(f":bar_chart: *Earliest available date per day* (Lima time)\n```{table}```{note}{overall}")
 
 
 def read_current_appointment(page: Page) -> date:
@@ -187,7 +240,9 @@ def wait(minutes: float) -> bool:
     return True
 
 
-def run(once: bool, headless: bool, report: bool) -> int:
+def run(once: bool, headless: bool, report: bool, summary: bool) -> int:
+    if summary:
+        daily_summary()
     best_notified: date | None = None
     empty_streak = 0
     errors = 0
@@ -238,6 +293,7 @@ def run(once: bool, headless: bool, report: bool) -> int:
 
             errors = relogins = 0
             checks += 1
+            record(dates)
             # Post "nothing found" on the first check if asked, then once per STATUS_EVERY_MIN
             if last_status is None:
                 last_status = time.monotonic()
@@ -299,7 +355,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="US visa appointment monitor (notify only)")
     ap.add_argument("--once", action="store_true", help="single check")
     ap.add_argument("--test", action="store_true", help="send a test message to Slack")
-    ap.add_argument("--report", action="store_true", help="post the status of the first check to Slack")
+    ap.add_argument("--report", action="store_true", help="post the daily summary and the first check's status to Slack")
     ap.add_argument("--show", action="store_true", help="show the browser window")
     args = ap.parse_args()
 
@@ -310,7 +366,8 @@ def main() -> None:
                "earlier than your current one shows up.")
         return
     try:
-        sys.exit(run(args.once, headless=not args.show, report=args.report or args.once))
+        sys.exit(run(args.once, headless=not args.show, report=args.report or args.once,
+                     summary=args.report))
     except KeyboardInterrupt:
         log.info("Stopped.")
 
