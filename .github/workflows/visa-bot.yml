@@ -56,8 +56,9 @@ jobs:
           case "${{ inputs.mode || 'loop' }}" in
             test) python bot.py --test ;;
             once) python bot.py --once ;;
-            # Manual loop runs and the daily 12:00 UTC run post the first check's status
-            *)    python bot.py ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 12 * * *') && '--report' || '' }} ;;
+            # Every loop run posts the first check's status (so a status every 6 hours);
+            # manual loop runs and the daily 12:00 UTC run also post the daily summary
+            *)    python bot.py ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 12 * * *') && '--report' || '--status' }} ;;
           esac
       - name: Save check history
         if: always()

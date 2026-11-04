@@ -62,10 +62,10 @@ GitHub Actions (cron, every 6h)
 
 | Run starts (UTC) | Lima time | Notes |
 |---|---|---|
-| 00:00 | 19:00 | |
-| 06:00 | 01:00 | |
+| 00:00 | 19:00 | Posts the first check's status |
+| 06:00 | 01:00 | Posts the first check's status |
 | 12:00 | 07:00 | Also posts the 📊 daily summary and the first check's status |
-| 18:00 | 13:00 | |
+| 18:00 | 13:00 | Posts the first check's status |
 
 Each run checks for about **5h35m**, then exits so the next scheduled run can start.
 GitHub may start scheduled runs a few minutes late.
@@ -78,7 +78,7 @@ GitHub may start scheduled runs a few minutes late.
 |---|---|
 | An earlier date is found | ✅ **APPOINTMENT FOUND!** as a large title, `@channel` (pushes to your phone even if the channel is muted), with the dates, your current appointment and a **Reschedule now** link. If you're logged out, the portal asks you to log in first (dismiss the "You need to sign in" popup) and then opens the reschedule page directly |
 | Every day at ~07:00 Lima, and when you start a manual `loop` run | 📊 **Earliest available date per day** for the last 7 days: the earliest date seen, when it was first seen, and how many checks ran (and came back empty). Also the best date since tracking started |
-| No earlier date: on a manual run, the daily ~07:00 Lima run, then at most every 3 hours (`STATUS_EVERY_MINUTES`) | 🔴 **No dates before your appointment**, with the earliest available date and how many checks ran since the last update |
+| No earlier date: on the first check of every run (every 6 hours) and of manual runs, plus every `STATUS_EVERY_MINUTES` within a run | 🔴 **No dates before your appointment**, with the earliest available date and how many checks ran since the last update |
 | Consulate shows no dates at all, same schedule as above | 🟡 **Visa bot running**, but the consulate shows no open dates right now |
 | 3 failed checks in a row, or a failed manual run | ⚠️ with the error |
 | Site looks rate-limited (3 empty responses in a row) | 🟡 **Pausing 3 hours** |
@@ -124,7 +124,7 @@ In the repository go to **Settings → Secrets and variables → Actions**.
 | `SCHEDULE_ID` | `12345678` | yes | The number in your reschedule URL: `.../niv/schedule/<SCHEDULE_ID>/appointment` |
 | `COUNTRY_CODE` | `es-pe` | no | Portal locale/country prefix. Default `es-pe` (Peru, Spanish) |
 | `CHECK_INTERVAL_MINUTES` | `10` | no | Minutes between checks (randomized ×0.8–1.4). Default `10` |
-| `STATUS_EVERY_MINUTES` | `180` | no | How often to post a "nothing found" status to Slack. Found dates always post right away. Default `180` |
+| `STATUS_EVERY_MINUTES` | `360` | no | How often to post a "nothing found" status within a run (each run also posts one on its first check). Found dates always post right away. Default `180`; `360` or more means one status per run, every 6 hours |
 | `CURRENT_APPOINTMENT_DATE` | `2027-04-13` | no | Fallback only, used if the bot can't read your appointment from the portal |
 
 ### 3. Test it
@@ -183,6 +183,7 @@ Locally they come from a `.env` file.
 python bot.py            # loop forever (or until MAX_RUNTIME_MINUTES)
 python bot.py --once     # single check; always posts the result to Slack
 python bot.py --report   # loop, and post the daily summary and the first check's status
+python bot.py --status   # loop, and post the first check's status
 python bot.py --test     # only send a test message to Slack
 python bot.py --show     # show the browser window (local debugging)
 ```

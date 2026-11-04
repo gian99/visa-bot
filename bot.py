@@ -8,6 +8,7 @@ Usage:
     python bot.py --once   # single check
     python bot.py --test   # only send a test message to Slack
     python bot.py --report # also post the daily summary and the first check's status to Slack
+    python bot.py --status # also post the first check's status to Slack
     python bot.py --show   # show the browser window (local debugging)
 """
 
@@ -387,6 +388,7 @@ def main() -> None:
     ap.add_argument("--once", action="store_true", help="single check")
     ap.add_argument("--test", action="store_true", help="send a test message to Slack")
     ap.add_argument("--report", action="store_true", help="post the daily summary and the first check's status to Slack")
+    ap.add_argument("--status", action="store_true", help="post the first check's status to Slack")
     ap.add_argument("--show", action="store_true", help="show the browser window")
     args = ap.parse_args()
 
@@ -397,7 +399,7 @@ def main() -> None:
                "earlier than your current one shows up.")
         return
     try:
-        sys.exit(run(args.once, headless=not args.show, report=args.report or args.once,
+        sys.exit(run(args.once, headless=not args.show, report=args.report or args.status or args.once,
                      summary=args.report))
     except KeyboardInterrupt:
         log.info("Stopped.")
